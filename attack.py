@@ -34,7 +34,7 @@ import os
 import json
 import argparse
 import gc
-from t import overfitting_checker,heruistic_check
+from test import overfitting_checker,heruistic_check
 import heapq
 
 # just used for early stopping, instead of looping for 3000 iterations...
@@ -268,6 +268,48 @@ def continous_generator(length:int,embed_weights):
     initialized_matrix = (gauss_random_values * std_devs) + column_means
     return initialized_matrix.unsqueeze(0).to('cuda:0')
 
+def alpha_adjust_trigger(loss_history, threshold_percent=0.01):
+    if len(loss_history) < 50:
+        return False
+
+    recent_losses = loss_history[-25:]  # Consider the last 10 losses
+    older_losses = loss_history[-50:-25]
+
+    # Compute percentage change
+    recent_avg_loss = np.mean(recent_losses)
+    older_avg_loss = np.mean(older_losses)
+    percent_change = abs(recent_avg_loss - older_avg_loss) / older_avg_loss
+
+    if percent_change < threshold_percent:
+        return True
+    return False
+
+def adjust_alpha(alpha_change_indicator,alpha):
+
+    # prob_change = sigmoid_function(iterations)
+
+    # if random.uniform(0, 1) < prob_change:
+    if alpha_change_indicator == "increase":
+        return 0.5*alpha + 0.5*alpha*random.uniform(1.0, 5.0)
+    elif alpha_change_indicator == "decrease":
+        return 0.5*alpha + 0.5*alpha*random.uniform(0.2, 1.0)
+    else:
+        return alpha
+    # else:
+    #     return alpha
+
+def sigmoid_function(x):
+    return 1 / (1 + np.exp(-0.1 * (x - 500)))  
+
+
+def update_min_max(embed_weights, alpha):
+    column_means = embed_weights.mean(dim=0).to('cuda:0')
+    column_vars = embed_weights.var(dim=0, unbiased=False).to('cuda:0')
+    std_devs = torch.sqrt(column_vars).to('cuda:0')
+    min_values = column_means - alpha * std_devs
+    max_values = column_means + alpha * std_devs
+    return min_values, max_values
+
 
 
 def run(
@@ -401,7 +443,11 @@ def run(
         overfitted = False
         jailbroken = False
         sigma_flag = False
-        minhp = latestqueue()
+        # minhp = latestqueue()
+        ###
+
+        ###
+        loss_history = []
         ###
 
 
@@ -423,7 +469,8 @@ def run(
             input_embedding.data -= torch.sign(grad) * step_size 
             p_2_norm = torch.norm(input_embedding.data, p=2)
             print("the grad is ", p_2_norm.item())
-            minhp.add(loss.item())
+            # minhp.add(loss.item())
+            loss_history.append(loss.item())
             if task == "sigma":
                 input_embedding.data = torch.clamp(input_embedding.data, min_values, max_values)
             model.zero_grad()
@@ -431,42 +478,51 @@ def run(
             # flag = minhp.are_top_10_same()
             # print("top 10 the same? ", flag)
             total_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "loss":loss.item(),"time":time.time()-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-            if i==50 or i== 100 or i==700 or i ==300 or i== 500 or i>=999:
-                output_embeds, output = generate(model, input_embeddings=input_embedding)
+            # if i==50 or i== 100 or i==700 or i ==300 or i== 500 or i>=999:
+            output = model.generate(input_embedding, max_new_tokens=100,num_beams=1,do_sample=False)
 
-                output_str = tokenizer.decode(output, skip_special_tokens=True)
-                endtime = time.time()
-                
-                print("the grad is ", p_2_norm)
-                # results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size})
+            output_str = tokenizer.decode(output, skip_special_tokens=True)
+            endtime = time.time()
+
+                    
+
+
+            print("the grad is ", p_2_norm)
+            # results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size})
+            print(output_str)
+            
+            ##
+            if task == "sigma":
+                flag,indicator = heruistic_check(tokenizer,output_str,target)
+                if not flag and alpha_adjust_trigger(loss_history):
+                    alpha=adjust_alpha(indicator,alpha)
+                    min_values, max_values = update_min_max(embed_weights, alpha)
+                    if indicator == "decrease" and random.uniform(0, 1) < 0.5:
+                        input_embedding.data += continous_generator(length,embed_weights) * 1e-8
+                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
                 print(output_str)
-                
-                ##
-                if task == "sigma":
-                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                    print(output_str)
-                    sigma_embeddings.append(input_embedding)
-                    # sigma_flag = True
+                # sigma_embeddings.append(input_embedding)
+                # sigma_flag = True
 
-                ### check for overfitting and jailbreak
-                elif task == "overfitting":
-                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                    print(output_str)
-                    overfitting_embeddings.append(input_embedding)
-                    overfitted = True
-                
-                elif task == "jailbroken" and heruistic_check(tokenizer,output_str,target):
-                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                    print(output_str)
-                    jailbreak_embeddings.append(input_embedding)
-                    jailbroken = True
+            ### check for overfitting and jailbreak
+            elif task == "overfitting":
+                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
+                print(output_str)
+                overfitting_embeddings.append(input_embedding)
+                overfitted = True
+            
+            elif task == "jailbroken" and heruistic_check(tokenizer,output_str,target)[0]:
+                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
+                print(output_str)
+                jailbreak_embeddings.append(input_embedding)
+                jailbroken = True
 
-                else:
-                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                    normal_task_embeddings.append(input_embedding)
-                    print(output_str)
-                if overfitted or jailbroken or sigma_flag:
-                    break
+            else:
+                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
+                normal_task_embeddings.append(input_embedding)
+                print(output_str)
+            if overfitted or jailbroken:
+                break
         # break
         ###
                 
