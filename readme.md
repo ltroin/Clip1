@@ -5,14 +5,14 @@
 ### Without the Clip Method
 To run the attack without using the Clip method:
 ```bash
-python attack.py --mode mixed --task no
+python attack.py --mode mixed --task no --model-path llama7b
 ```
 
 ### With the Clip Method
 To run the attack using the Clip method:
 
 ```bash
-python attack.py --mode mixed --task sigma
+python attack.py --mode mixed --task sigma --model-path llama7b
 ```
 
 ## Evaluating the Results

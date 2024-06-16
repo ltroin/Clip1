@@ -520,7 +520,7 @@ def run(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Running embedding attack")
-    parser.add_argument("--model_path", type=str, default="llama")
+    parser.add_argument("--model_path", type=str, default="llama7b")
     parser.add_argument("--alpha", type=float, default=0.5)
     parser.add_argument("--length", type=int, default=100)
     parser.add_argument("--mode", type=str, default="mixed")
