@@ -40,7 +40,7 @@ import os
 import json
 import argparse
 import gc
-from t import overfitting_checker,heruistic_check
+from test import overfitting_checker,heruistic_check
 import heapq
 
 # just used for early stopping, instead of looping for 3000 iterations...
@@ -499,16 +499,16 @@ def run(
         # savepath = f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_sigma.pt"
         # torch.save(sigma_embeddings, savepath)
         ## total
-        with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_total.json", "w") as f:
-            json.dump(total_json, f, indent=4)
+        # with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_total.json", "w") as f:
+        #     json.dump(total_json, f, indent=4)
     else:
         with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_normal.json", "w") as f:
             json.dump(results_json, f, indent=4)
         # savepath = f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_normal.pt"
         # torch.save(normal_task_embeddings, savepath)
         ## total
-        with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_total.json", "w") as f:
-            json.dump(total_json, f, indent=4)
+        # with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_total.json", "w") as f:
+        #     json.dump(total_json, f, indent=4)
     
 
     ###
