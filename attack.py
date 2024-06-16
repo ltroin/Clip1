@@ -1,11 +1,17 @@
 """ 
-Code Adapted from 
-@misc{schwinn2023adversarial,
-      title={Adversarial Attacks and Defenses in Large Language Models: Old and New Threats}, 
-      author={Leo Schwinn and David Dobre and Stephan G\"unnemann and Gauthier Gidel},
-      year={2023},
-      eprint={2310.19737},
-      archivePrefix={arXiv},
+Inspired by the 
+@article{schwinn2023adversarial,
+  title={Adversarial attacks and defenses in large language models: Old and new threats},
+  author={Schwinn, Leo and Dobre, David and G{\"u}nnemann, Stephan and Gidel, Gauthier},
+  journal={arXiv preprint arXiv:2310.19737},
+  year={2023}
+}
+
+@article{schwinn2024soft,
+  title={Soft Prompt Threats: Attacking Safety Alignment and Unlearning in Open-Source LLMs through the Embedding Space},
+  author={Schwinn, Leo and Dobre, David and Xhonneux, Sophie and Gidel, Gauthier and Gunnemann, Stephan},
+  journal={arXiv preprint arXiv:2402.09063},
+  year={2024}
 }
 """
 import csv
@@ -34,7 +40,7 @@ import os
 import json
 import argparse
 import gc
-from test import overfitting_checker,heruistic_check
+from t import overfitting_checker,heruistic_check
 import heapq
 
 # just used for early stopping, instead of looping for 3000 iterations...
@@ -268,48 +274,6 @@ def continous_generator(length:int,embed_weights):
     initialized_matrix = (gauss_random_values * std_devs) + column_means
     return initialized_matrix.unsqueeze(0).to('cuda:0')
 
-def alpha_adjust_trigger(loss_history, threshold_percent=0.01):
-    if len(loss_history) < 50:
-        return False
-
-    recent_losses = loss_history[-25:]  # Consider the last 10 losses
-    older_losses = loss_history[-50:-25]
-
-    # Compute percentage change
-    recent_avg_loss = np.mean(recent_losses)
-    older_avg_loss = np.mean(older_losses)
-    percent_change = abs(recent_avg_loss - older_avg_loss) / older_avg_loss
-
-    if percent_change < threshold_percent:
-        return True
-    return False
-
-def adjust_alpha(alpha_change_indicator,alpha):
-
-    # prob_change = sigmoid_function(iterations)
-
-    # if random.uniform(0, 1) < prob_change:
-    if alpha_change_indicator == "increase":
-        return 0.5*alpha + 0.5*alpha*random.uniform(1.0, 5.0)
-    elif alpha_change_indicator == "decrease":
-        return 0.5*alpha + 0.5*alpha*random.uniform(0.2, 1.0)
-    else:
-        return alpha
-    # else:
-    #     return alpha
-
-def sigmoid_function(x):
-    return 1 / (1 + np.exp(-0.1 * (x - 500)))  
-
-
-def update_min_max(embed_weights, alpha):
-    column_means = embed_weights.mean(dim=0).to('cuda:0')
-    column_vars = embed_weights.var(dim=0, unbiased=False).to('cuda:0')
-    std_devs = torch.sqrt(column_vars).to('cuda:0')
-    min_values = column_means - alpha * std_devs
-    max_values = column_means + alpha * std_devs
-    return min_values, max_values
-
 
 
 def run(
@@ -443,11 +407,7 @@ def run(
         overfitted = False
         jailbroken = False
         sigma_flag = False
-        # minhp = latestqueue()
-        ###
-
-        ###
-        loss_history = []
+        minhp = latestqueue()
         ###
 
 
@@ -469,8 +429,7 @@ def run(
             input_embedding.data -= torch.sign(grad) * step_size 
             p_2_norm = torch.norm(input_embedding.data, p=2)
             print("the grad is ", p_2_norm.item())
-            # minhp.add(loss.item())
-            loss_history.append(loss.item())
+            minhp.add(loss.item())
             if task == "sigma":
                 input_embedding.data = torch.clamp(input_embedding.data, min_values, max_values)
             model.zero_grad()
@@ -478,51 +437,42 @@ def run(
             # flag = minhp.are_top_10_same()
             # print("top 10 the same? ", flag)
             total_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "loss":loss.item(),"time":time.time()-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-            # if i==50 or i== 100 or i==700 or i ==300 or i== 500 or i>=999:
-            output = model.generate(input_embedding, max_new_tokens=100,num_beams=1,do_sample=False)
+            if i== 100 or i== 500 or i>=999:
+                output_embeds, output = generate(model, input_embeddings=input_embedding)
 
-            output_str = tokenizer.decode(output, skip_special_tokens=True)
-            endtime = time.time()
+                output_str = tokenizer.decode(output, skip_special_tokens=True)
+                endtime = time.time()
+                
+                print("the grad is ", p_2_norm)
+                # results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size})
+                # print(output_str)
+                
+                ##
+                if task == "sigma":
+                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
+                    print(output_str)
+                    # sigma_embeddings.append(input_embedding)
+                    # sigma_flag = True
 
-                    
+                ### check for overfitting and jailbreak
+                elif task == "overfitting":
+                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
+                    print(output_str)
+                    # overfitting_embeddings.append(input_embedding)
+                    # overfitted = True
+                
+                elif task == "jailbroken" and heruistic_check(tokenizer,output_str,target):
+                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
+                    print(output_str)
+                    # jailbreak_embeddings.append(input_embedding)
+                    # jailbroken = True
 
-
-            print("the grad is ", p_2_norm)
-            # results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size})
-            print(output_str)
-            
-            ##
-            if task == "sigma":
-                flag,indicator = heruistic_check(tokenizer,output_str,target)
-                if not flag and alpha_adjust_trigger(loss_history):
-                    alpha=adjust_alpha(indicator,alpha)
-                    min_values, max_values = update_min_max(embed_weights, alpha)
-                    if indicator == "decrease" and random.uniform(0, 1) < 0.5:
-                        input_embedding.data += continous_generator(length,embed_weights) * 1e-8
-                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                print(output_str)
-                # sigma_embeddings.append(input_embedding)
-                # sigma_flag = True
-
-            ### check for overfitting and jailbreak
-            elif task == "overfitting":
-                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                print(output_str)
-                overfitting_embeddings.append(input_embedding)
-                overfitted = True
-            
-            elif task == "jailbroken" and heruistic_check(tokenizer,output_str,target)[0]:
-                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                print(output_str)
-                jailbreak_embeddings.append(input_embedding)
-                jailbroken = True
-
-            else:
-                results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
-                normal_task_embeddings.append(input_embedding)
-                print(output_str)
-            if overfitted or jailbroken:
-                break
+                else:
+                    results_json.append({"target":target,"mode":mode,"length":length,"alpha":alpha, "step": i+1, "output": output_str,"loss":loss.item(),"time":endtime-start_time,"model_name":model_name,"model_size":model_size,"task":task,"p_2_norm":p_2_norm.item()})
+                    # normal_task_embeddings.append(input_embedding)
+                    print(output_str)
+                # if overfitted or jailbroken or sigma_flag:
+                #     break
         # break
         ###
                 
@@ -534,30 +484,30 @@ def run(
 
     ### embedding save
     if task == "overfitting":
-        with open(f"Results/embedding/{model_name}_{model_size}_{mode}_{length}_{alpha}_overfitting.json", "w") as f:
+        with open(f"Results/{model_name}_{model_size}_{mode}_{length}_{alpha}_overfitting.json", "w") as f:
             json.dump(results_json, f, indent=4)
-        savepath = f"Results/embedding/{model_name}_{model_size}_{mode}_{length}_{alpha}_overfitting.pt"
-        torch.save(overfitting_embeddings, savepath)
+        # savepath = f"Results/embedding/{model_name}_{model_size}_{mode}_{length}_{alpha}_overfitting.pt"
+        # torch.save(overfitting_embeddings, savepath)
     elif task == "jailbroken":
-        with open(f"Results/embedding/{model_name}_{model_size}_{mode}_{length}_{alpha}_jailbroken.json", "w") as f:
+        with open(f"Results/{model_name}_{model_size}_{mode}_{length}_{alpha}_jailbroken.json", "w") as f:
             json.dump(results_json, f, indent=4)
-        savepath = f"Results/embedding/{model_name}_{model_size}_{mode}_{length}_{alpha}_jailbroken.pt"
-        torch.save(jailbreak_embeddings, savepath)
+        # savepath = f"Results/embedding/{model_name}_{model_size}_{mode}_{length}_{alpha}_jailbroken.pt"
+        # torch.save(jailbreak_embeddings, savepath)
     elif task == "sigma":
-        with open(f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_sigma.json", "w") as f:
+        with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_sigma.json", "w") as f:
             json.dump(results_json, f, indent=4)
-        savepath = f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_sigma.pt"
-        torch.save(sigma_embeddings, savepath)
+        # savepath = f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_sigma.pt"
+        # torch.save(sigma_embeddings, savepath)
         ## total
-        with open(f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_total.json", "w") as f:
+        with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_{sigma}_total.json", "w") as f:
             json.dump(total_json, f, indent=4)
     else:
-        with open(f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_normal.json", "w") as f:
+        with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_normal.json", "w") as f:
             json.dump(results_json, f, indent=4)
-        savepath = f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_normal.pt"
-        torch.save(normal_task_embeddings, savepath)
+        # savepath = f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_normal.pt"
+        # torch.save(normal_task_embeddings, savepath)
         ## total
-        with open(f"Results/embedding/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_total.json", "w") as f:
+        with open(f"Results/{model_name}/{model_name}_{model_size}_{mode}_{length}_{alpha}_total.json", "w") as f:
             json.dump(total_json, f, indent=4)
     
 
@@ -575,7 +525,7 @@ if __name__ == "__main__":
     parser.add_argument("--length", type=int, default=100)
     parser.add_argument("--mode", type=str, default="mixed")
     parser.add_argument("--num_steps", type=int, default=1000)
-    parser.add_argument("--task", type=str, default="normal")
+    parser.add_argument("--task", type=str, default="no")
     parser.add_argument("--sigma", type=int, default=-1)
     args = parser.parse_args()
 
@@ -590,8 +540,6 @@ if __name__ == "__main__":
                 # alpha = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
                 for j in alpha:
                     if i ==1 and alpha==0.5:
-                        continue
-                    if i ==100 and alpha ==0.5:
                         continue
                     run(model_path=args.model_path, alpha=j, length=i, mode=args.mode, num_steps=args.num_steps)
         else:
@@ -613,4 +561,3 @@ if __name__ == "__main__":
             run(model_path=args.model_path, alpha=0.5, length=i, mode=args.mode, num_steps=args.num_steps, task="normal")
     else:
         run(model_path=args.model_path, alpha=args.alpha, length=args.length, mode=args.mode, num_steps=args.num_steps, task=args.task)
-
