@@ -43,7 +43,7 @@ We employed the continuous version for length 1 and the hybrid version for lengt
 
 
 ## Comparison of ASR Metrics for Different Attack Methods
-We conducted preliminary experiments to bridge this gap in our study. Specifically, we followed the original parameters from the papers by Zou et al. (2023b) and Schwinn et al. (2023), utilized a random sample of five cases from our benchmark, and observed the following differences:
+We conducted preliminary experiments to bridge this gap in our study. Specifically, we followed the original parameters from the papers by Zou et al. (2023b) and Schwinn et al. (2023), utilized a random sample of five cases from our benchmark (see Data/data_new.csv), and observed the following differences:
 
 ### Efficiency:
 
