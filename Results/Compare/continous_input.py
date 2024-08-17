@@ -477,7 +477,7 @@ def run(
                     # normal_task_embeddings.append(input_embedding)
                     print(output_str)
             # if overfitted or jailbroken or sigma_flag:
-            #     break
+                break
         # break
         ###
                 
@@ -530,7 +530,7 @@ if __name__ == "__main__":
     parser.add_argument("--length", type=int, default=100)
     parser.add_argument("--mode", type=str, default="mixed")
     parser.add_argument("--num_steps", type=int, default=1000)
-    parser.add_argument("--task", type=str, default="no")
+    parser.add_argument("--task", type=str, default="sigma")
     parser.add_argument("--sigma", type=int, default=-1)
     args = parser.parse_args()
 
@@ -551,8 +551,8 @@ if __name__ == "__main__":
             run(model_path=args.model_path, alpha=args.alpha, length=args.length, mode=args.mode, num_steps=args.num_steps)
     elif args.task == "sigma":
         #length from 1 to 100
-        length = [1, 40, 70, 100]
-        sigma = [2, 5, 7, 10]
+        length = [40]
+        sigma = [7]
         # length = [1] + list(range(10, 101, 10))
         for i in length:
             #alpha from 0 to 1.0; 0 is all continous, 1 is all discrete
